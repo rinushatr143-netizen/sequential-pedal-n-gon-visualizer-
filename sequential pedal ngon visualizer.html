@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sequential Pedal Construction of n-gons</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f5f5f5; }
+  .wrap { max-width: 1150px; margin: 20px auto; padding: 15px; }
+  h1 { text-align: center; margin-bottom: 8px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+              background: white; padding: 12px; border-radius: 8px; }
+  label { font-weight: 600; }
+  input[type=range] { width: 180px; }
+  button { padding: 7px 14px; border: 1px solid #888; border-radius: 5px;
+           background: white; cursor: pointer; }
+  canvas { display: block; width: 100%; max-width: 1050px; height: 700px;
+           margin: 15px auto; background: white; border: 1px solid #bbb; }
+  .info { background: white; padding: 12px; border-radius: 8px; line-height: 1.5; }
+  code { background: #eee; padding: 2px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Sequential Pedal Construction and Pivot Circles</h1>
+
+<div class="controls">
+  <label>n-gon:
+    <input id="n" type="range" min="3" max="15" value="6">
+    <span id="nVal">6</span>
+  </label>
+
+  <label>Stages:
+    <input id="stage" type="range" min="0" max="6" value="2">
+    <span id="stageVal">2</span>
+  </label>
+
+  <label>
+    <input id="showAll" type="checkbox" checked>
+    Show previous pedal polygons
+  </label>
+
+  <label>
+    <input id="showCircles" type="checkbox" checked>
+    Show pivot circles
+  </label>
+
+  <button id="reset">Reset point P</button>
+</div>
+
+<canvas id="canvas" width="1050" height="700"></canvas>
+
+<div class="info">
+  <b>Construction:</b><br>
+  Starting with a simple n-gon
+  \(P_0=(V_1^{(0)},\ldots,V_n^{(0)})\), each vertex of the next polygon
+  is the perpendicular foot of the fixed point \(P\) on the corresponding
+  edge of the previous polygon.<br><br>
+
+  <b>Pivot circles at the transition \(P_k\to P_{k+1}\):</b><br>
+  \(C_1\) passes through
+  \(V_1^{(k)},V_1^{(k+1)},V_n^{(k+1)}\), while
+  \(C_i\) passes through
+  \(V_i^{(k)},V_i^{(k+1)},V_{i-1}^{(k+1)}\),
+  \(i=2,\ldots,n\).<br><br>
+
+  The visualization highlights the fixed point \(P\). For nondegenerate
+  configurations, the pivot circles pass through this same point.
+</div>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let P = {x: 0.22, y: -0.12};
+
+const colors = [
+  "#1565c0", "#ef6c00", "#2e7d32", "#c62828",
+  "#6a1b9a", "#00838f", "#ad1457"
+];
+
+function vecSub(a,b){ return {x:a.x-b.x, y:a.y-b.y}; }
+function dot(a,b){ return a.x*b.x+a.y*b.y; }
+function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+
+function foot(P,A,B){
+  const d = vecSub(B,A);
+  const den = dot(d,d);
+  if (den < 1e-12) return {...A};
+  const t = dot(vecSub(P,A),d)/den;
+  return {x:A.x+t*d.x, y:A.y+t*d.y};
+}
+
+function pedalPolygon(poly){
+  const q=[];
+  for(let i=0;i<poly.length;i++)
+    q.push(foot(P, poly[i], poly[(i+1)%poly.length]));
+  return q;
+}
+
+// Circumcircle through three points.
+function circle3(A,B,C){
+  const d = 2*(A.x*(B.y-C.y)+B.x*(C.y-A.y)+C.x*(A.y-B.y));
+  if(Math.abs(d)<1e-10) return null;
+
+  const a2=A.x*A.x+A.y*A.y;
+  const b2=B.x*B.x+B.y*B.y;
+  const c2=C.x*C.x+C.y*C.y;
+
+  const ux=(a2*(B.y-C.y)+b2*(C.y-A.y)+c2*(A.y-B.y))/d;
+  const uy=(a2*(C.x-B.x)+b2*(A.x-C.x)+c2*(B.x-A.x))/d;
+  const O={x:ux,y:uy};
+  return {O:O,r:dist(O,A)};
+}
+
+function initialPolygon(n){
+  // Slightly perturbed radial polygon; remains cyclically ordered.
+  const poly=[];
+  for(let i=0;i<n;i++){
+    const t=2*Math.PI*i/n;
+    const r=1 + 0.12*Math.sin(3*t+0.4);
+    poly.push({x:r*Math.cos(t), y:r*Math.sin(t)});
+  }
+  return poly;
+}
+
+function buildPolygons(n, stages){
+  const polys=[initialPolygon(n)];
+  for(let k=0;k<stages;k++){
+    polys.push(pedalPolygon(polys[polys.length-1]));
+  }
+  return polys;
+}
+
+function worldToCanvas(p,scale,cx,cy){
+  return {x:cx+scale*p.x, y:cy-scale*p.y};
+}
+
+function drawPoly(poly, color, scale,cx,cy, width=2, alpha=1){
+  if(!poly.length) return;
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.strokeStyle=color;
+  ctx.fillStyle=color;
+  ctx.lineWidth=width;
+  ctx.beginPath();
+  let q=worldToCanvas(poly[0],scale,cx,cy);
+  ctx.moveTo(q.x,q.y);
+  for(let i=1;i<poly.length;i++){
+    q=worldToCanvas(poly[i],scale,cx,cy);
+    ctx.lineTo(q.x,q.y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+
+  for(let i=0;i<poly.length;i++){
+    q=worldToCanvas(poly[i],scale,cx,cy);
+    ctx.beginPath();
+    ctx.arc(q.x,q.y,4,0,2*Math.PI);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCircle(circle,scale,cx,cy,color){
+  if(!circle) return;
+  const o=worldToCanvas(circle.O,scale,cx,cy);
+  ctx.save();
+  ctx.strokeStyle=color;
+  ctx.lineWidth=1.4;
+  ctx.setLineDash([7,5]);
+  ctx.beginPath();
+  ctx.arc(o.x,o.y,circle.r*scale,0,2*Math.PI);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPoint(p,scale,cx,cy,color,r=7){
+  const q=worldToCanvas(p,scale,cx,cy);
+  ctx.save();
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.arc(q.x,q.y,r,0,2*Math.PI);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawLabel(text,p,scale,cx,cy,dx=7,dy=-7){
+  const q=worldToCanvas(p,scale,cx,cy);
+  ctx.save();
+  ctx.fillStyle="#111";
+  ctx.font="14px Arial";
+  ctx.fillText(text,q.x+dx,q.y+dy);
+  ctx.restore();
+}
+
+function render(){
+  const n=+document.getElementById("n").value;
+  const stages=+document.getElementById("stage").value;
+  const showAll=document.getElementById("showAll").checked;
+  const showCircles=document.getElementById("showCircles").checked;
+
+  document.getElementById("nVal").textContent=n;
+  document.getElementById("stageVal").textContent=stages;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const polys=buildPolygons(n,stages);
+
+  // Determine scale automatically.
+  let maxR=1.3;
+  for(const poly of polys)
+    for(const p of poly) maxR=Math.max(maxR,Math.hypot(p.x,p.y));
+  maxR=Math.max(maxR,Math.hypot(P.x,P.y));
+  const scale=Math.min(canvas.width,canvas.height)*0.43/maxR;
+  const cx=canvas.width/2, cy=canvas.height/2;
+
+  // Grid
+  ctx.save();
+  ctx.strokeStyle="#e5e5e5";
+  ctx.lineWidth=1;
+  for(let x=cx%50;x<canvas.width;x+=50){
+    ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();
+  }
+  for(let y=cy%50;y<canvas.height;y+=50){
+    ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
+  }
+  ctx.restore();
+
+  // Previous/current polygons
+  const start=showAll ? 0 : stages;
+  for(let k=start;k<=stages;k++){
+    const alpha=(k===stages)?1:0.45;
+    drawPoly(polys[k],colors[k%colors.length],scale,cx,cy,2,alpha);
+  }
+
+  // Pivot circles for the latest transition.
+  if(showCircles && stages>=1){
+    const A=polys[stages-1];
+    const B=polys[stages];
+
+    for(let i=0;i<n;i++){
+      let a,b,c;
+      if(i===0){
+        a=A[0]; b=B[0]; c=B[n-1];
+      }else{
+        a=A[i]; b=B[i]; c=B[i-1];
+      }
+      const circle=circle3(a,b,c);
+      if(circle) drawCircle(circle,scale,cx,cy,colors[i%colors.length]);
+    }
+  }
+
+  // Fixed point P
+  drawPoint(P,scale,cx,cy,"#111",8);
+  drawLabel("P",P,scale,cx,cy,10,-10);
+
+  // Vertex labels on current polygon
+  const current=polys[stages];
+  for(let i=0;i<n;i++)
+    drawLabel(`V${i+1}(${stages})`,current[i],scale,cx,cy,6,-6);
+
+  // Title inside canvas
+  ctx.save();
+  ctx.fillStyle="#111";
+  ctx.font="bold 17px Arial";
+  ctx.fillText(`n = ${n},  pedal stage = ${stages}`,20,28);
+  ctx.font="14px Arial";
+  ctx.fillText("Dashed circles: pivot circles",20,50);
+  ctx.restore();
+}
+
+document.getElementById("n").addEventListener("input",render);
+document.getElementById("stage").addEventListener("input",render);
+document.getElementById("showAll").addEventListener("change",render);
+document.getElementById("showCircles").addEventListener("change",render);
+
+document.getElementById("reset").addEventListener("click",()=>{
+  P={x:0.22,y:-0.12};
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
